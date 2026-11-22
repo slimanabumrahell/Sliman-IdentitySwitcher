@@ -1,6 +1,8 @@
 package com.sliman.identity.hook
 
+import android.app.Application
 import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -10,32 +12,67 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.io.File
 import java.util.Locale
 import java.util.TimeZone
 
 class IdentityHookMain : IXposedHookLoadPackage {
 
+    private val hookedPackages = mutableSetOf<String>()
+
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        // تجاهل حزمة وحدة الإدارة نفسها لتفادي أي حلقات أو تعارض
         if (lpparam.packageName == "com.sliman.identity") return
 
-        // انتظر تهيئة Application context لقراءة البروفايل المخصص لهذا التطبيق
+        // محاولة مبكرة عبر attachBaseContext قبل تشغيل Application.onCreate
+        XposedHelpers.findAndHookMethod(
+            ContextWrapper::class.java,
+            "attachBaseContext",
+            Context::class.java,
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (hookedPackages.contains(lpparam.packageName)) return
+                    val baseContext = param.args[0] as? Context ?: return
+                    val profile = loadProfile(baseContext, lpparam.packageName) ?: return
+                    hookedPackages.add(lpparam.packageName)
+                    XposedBridge.log("SlimanIdentity: applied early hook for ${lpparam.packageName} -> ${profile.profileName}")
+                    applyHooks(lpparam.classLoader, profile)
+                }
+            }
+        )
+
+        // خطاف احتياطي عبر Instrumentation.callApplicationOnCreate (beforeHookedMethod)
         XposedHelpers.findAndHookMethod(
             "android.app.Instrumentation",
             lpparam.classLoader,
             "callApplicationOnCreate",
-            android.app.Application::class.java,
+            Application::class.java,
             object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val app = param.args[0] as? android.app.Application ?: return
-                    val profile = loadProfileForPackage(app.applicationContext, lpparam.packageName) ?: return
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (hookedPackages.contains(lpparam.packageName)) return
+                    val app = param.args[0] as? Application ?: return
+                    val profile = loadProfile(app.baseContext ?: app.applicationContext, lpparam.packageName) ?: return
+                    hookedPackages.add(lpparam.packageName)
+                    XposedBridge.log("SlimanIdentity: applied Instrumentation hook for ${lpparam.packageName} -> ${profile.profileName}")
                     applyHooks(lpparam.classLoader, profile)
                 }
             }
         )
     }
 
-    private fun loadProfileForPackage(context: Context, packageName: String): DeviceProfile? {
+    private fun loadProfile(context: Context?, packageName: String): DeviceProfile? {
+        // 1. القراءة المباشرة من ملف JSON في /data/local/tmp/sliman_identity
+        try {
+            val file = File("/data/local/tmp/sliman_identity/$packageName.json")
+            if (file.exists() && file.canRead()) {
+                val raw = file.readText()
+                val parsed = DeviceProfile.fromJson(raw)
+                if (parsed != null) return parsed
+            }
+        } catch (_: Throwable) {
+        }
+
+        // 2. Fallback عبر ContentProvider
+        if (context == null) return null
         return try {
             val uri = Uri.parse("content://com.sliman.identity.provider/profile/$packageName")
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -48,13 +85,12 @@ class IdentityHookMain : IXposedHookLoadPackage {
                 null
             }
         } catch (e: Throwable) {
-            XposedBridge.log("SlimanIdentity: failed to read profile for $packageName -> ${e.message}")
+            XposedBridge.log("SlimanIdentity: failed to load profile for $packageName -> ${e.message}")
             null
         }
     }
 
     private fun applyHooks(classLoader: ClassLoader, profile: DeviceProfile) {
-        // 1. تعديل خصائص Build
         setStaticFieldIfNotBlank(Build::class.java, "MANUFACTURER", profile.manufacturer)
         setStaticFieldIfNotBlank(Build::class.java, "BRAND", profile.brand)
         setStaticFieldIfNotBlank(Build::class.java, "MODEL", profile.model)
@@ -62,7 +98,6 @@ class IdentityHookMain : IXposedHookLoadPackage {
         setStaticFieldIfNotBlank(Build::class.java, "HARDWARE", profile.hardware)
         setStaticFieldIfNotBlank(Build::class.java, "FINGERPRINT", profile.fingerprint)
 
-        // 2. تعديل ANDROID_ID
         if (profile.androidId.isNotBlank()) {
             XposedHelpers.findAndHookMethod(
                 Settings.Secure::class.java,
@@ -79,7 +114,6 @@ class IdentityHookMain : IXposedHookLoadPackage {
             )
         }
 
-        // 3. تعديل المنطقة الزمنية واللغة داخل نطاق التطبيق
         if (profile.timeZoneId.isNotBlank()) {
             val customTz = TimeZone.getTimeZone(profile.timeZoneId)
             TimeZone.setDefault(customTz)
@@ -112,7 +146,6 @@ class IdentityHookMain : IXposedHookLoadPackage {
             )
         }
 
-        // 4. تعديل بيانات الشبكة والشريحة عبر TelephonyManager
         hookTelephony(classLoader, profile)
     }
 
@@ -184,7 +217,6 @@ class IdentityHookMain : IXposedHookLoadPackage {
                 XposedHelpers.findAndHookMethod(clazz, methodName, callback)
             }
         } catch (_: Throwable) {
-            // تجاهل إذا اختلفت التواقيع أو الدالة غير موجودة في نسخة أندرويد الحالية
         }
     }
 
@@ -195,7 +227,6 @@ class IdentityHookMain : IXposedHookLoadPackage {
             field.isAccessible = true
             field.set(null, value)
         } catch (_: Throwable) {
-            // بعض الحقول على إصدارات أندرويد الحديثة قد تكون مقيدة
         }
     }
 }
