@@ -39,13 +39,12 @@ jobs:
           /tmp/gradle-dist/gradle-${GRADLE_VER}/bin/gradle wrapper --gradle-version "${GRADLE_VER}" --distribution-type bin
           chmod +x gradlew
 
-        - name: Download Xposed API 82 JAR
+      - name: Download Xposed API 82 JAR
         run: |
           mkdir -p app/libs
           curl -sSL -f "https://github.com/MALTF/XposedBridgeAPI/releases/download/v82/api-82.jar" -o app/libs/api-82.jar || \
           curl -sSL -f "https://artifactory.appodeal.com/appodeal-public/de/robv/android/xposed/api/82/api-82.jar" -o app/libs/api-82.jar
           ls -lh app/libs/api-82.jar
-
 
       - name: Build Debug & Release APKs
         run: ./gradlew assembleDebug assembleRelease --no-daemon
