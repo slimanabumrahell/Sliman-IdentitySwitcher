@@ -44,6 +44,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
 
-    // واجهة Xposed API تُستخدم كـ compileOnly فقط
-    compileOnly("de.robv.android.xposed:api:82")
+       // قراءة واجهة Xposed API محلياً كـ compileOnly فقط
+    compileOnly(files("libs/api-82.jar"))
+
 }
