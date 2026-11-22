@@ -23,7 +23,8 @@ class IdentityHookMain : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName == "com.sliman.identity") return
 
-        // محاولة مبكرة عبر attachBaseContext قبل تشغيل Application.onCreate
+        XposedBridge.log("SlimanIdentity: handleLoadPackage -> ${lpparam.packageName}")
+
         XposedHelpers.findAndHookMethod(
             ContextWrapper::class.java,
             "attachBaseContext",
@@ -40,7 +41,6 @@ class IdentityHookMain : IXposedHookLoadPackage {
             }
         )
 
-        // خطاف احتياطي عبر Instrumentation.callApplicationOnCreate (beforeHookedMethod)
         XposedHelpers.findAndHookMethod(
             "android.app.Instrumentation",
             lpparam.classLoader,
@@ -60,18 +60,28 @@ class IdentityHookMain : IXposedHookLoadPackage {
     }
 
     private fun loadProfile(context: Context?, packageName: String): DeviceProfile? {
-        // 1. القراءة المباشرة من ملف JSON في /data/local/tmp/sliman_identity
         try {
             val file = File("/data/local/tmp/sliman_identity/$packageName.json")
-            if (file.exists() && file.canRead()) {
-                val raw = file.readText()
-                val parsed = DeviceProfile.fromJson(raw)
-                if (parsed != null) return parsed
+            if (file.exists()) {
+                if (file.canRead()) {
+                    val raw = file.readText()
+                    val parsed = DeviceProfile.fromJson(raw)
+                    if (parsed != null) {
+                        XposedBridge.log("SlimanIdentity: loaded JSON file for $packageName")
+                        return parsed
+                    } else {
+                        XposedBridge.log("SlimanIdentity: invalid JSON in file for $packageName")
+                    }
+                } else {
+                    XposedBridge.log("SlimanIdentity: file exists but canRead()=false for $packageName")
+                }
+            } else {
+                XposedBridge.log("SlimanIdentity: file not found for $packageName")
             }
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            XposedBridge.log("SlimanIdentity: file error for $packageName -> ${e.javaClass.simpleName}: ${e.message}")
         }
 
-        // 2. Fallback عبر ContentProvider
         if (context == null) return null
         return try {
             val uri = Uri.parse("content://com.sliman.identity.provider/profile/$packageName")
@@ -79,13 +89,14 @@ class IdentityHookMain : IXposedHookLoadPackage {
                 if (cursor.moveToFirst()) {
                     val idx = cursor.getColumnIndex("json_data")
                     if (idx >= 0) {
+                        XposedBridge.log("SlimanIdentity: loaded profile via ContentProvider for $packageName")
                         return DeviceProfile.fromJson(cursor.getString(idx))
                     }
                 }
                 null
             }
         } catch (e: Throwable) {
-            XposedBridge.log("SlimanIdentity: failed to load profile for $packageName -> ${e.message}")
+            XposedBridge.log("SlimanIdentity: provider error for $packageName -> ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
@@ -97,6 +108,8 @@ class IdentityHookMain : IXposedHookLoadPackage {
         setStaticFieldIfNotBlank(Build::class.java, "DEVICE", profile.device)
         setStaticFieldIfNotBlank(Build::class.java, "HARDWARE", profile.hardware)
         setStaticFieldIfNotBlank(Build::class.java, "FINGERPRINT", profile.fingerprint)
+
+        hookSystemProperties(classLoader, profile)
 
         if (profile.androidId.isNotBlank()) {
             XposedHelpers.findAndHookMethod(
@@ -147,6 +160,43 @@ class IdentityHookMain : IXposedHookLoadPackage {
         }
 
         hookTelephony(classLoader, profile)
+    }
+
+    private fun hookSystemProperties(classLoader: ClassLoader, profile: DeviceProfile) {
+        val spClass = XposedHelpers.findClassIfExists("android.os.SystemProperties", classLoader) ?: return
+        val propMap = mapOf(
+            "ro.product.manufacturer" to profile.manufacturer,
+            "ro.product.brand" to profile.brand,
+            "ro.product.model" to profile.model,
+            "ro.product.device" to profile.device,
+            "ro.build.fingerprint" to profile.fingerprint,
+            "persist.sys.timezone" to profile.timeZoneId
+        ).filterValues { it.isNotBlank() }
+
+        XposedHelpers.findAndHookMethod(
+            spClass,
+            "get",
+            String::class.java,
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val key = param.args[0] as? String ?: return
+                    propMap[key]?.let { param.result = it }
+                }
+            }
+        )
+
+        XposedHelpers.findAndHookMethod(
+            spClass,
+            "get",
+            String::class.java,
+            String::class.java,
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val key = param.args[0] as? String ?: return
+                    propMap[key]?.let { param.result = it }
+                }
+            }
+        )
     }
 
     private fun hookTelephony(classLoader: ClassLoader, profile: DeviceProfile) {
