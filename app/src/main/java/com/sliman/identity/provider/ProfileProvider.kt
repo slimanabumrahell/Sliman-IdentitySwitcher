@@ -37,7 +37,6 @@ class ProfileProvider : ContentProvider() {
         val activeProfileId = prefs.getString("active_profile_$targetPkg", null) ?: return null
         val jsonStr = prefs.getString("profile_data_$activeProfileId", null) ?: return null
 
-        // التحقق من صلاحية JSON عبر DeviceProfile
         DeviceProfile.fromJson(jsonStr) ?: return null
 
         val cursor = MatrixCursor(arrayOf("json_data"))
@@ -71,10 +70,12 @@ class ProfileProvider : ContentProvider() {
                 try {
                     val dir = File("/data/local/tmp/sliman_identity")
                     if (!dir.exists()) dir.mkdirs()
+                    dir.setReadable(true, false)
+                    dir.setExecutable(true, false)
+
                     val outFile = File(dir, "${profile.targetPackage}.json")
                     outFile.writeText(profile.toJson())
                     outFile.setReadable(true, false)
-                    dir.setExecutable(true, false)
                 } catch (_: Throwable) {
                 }
             }
