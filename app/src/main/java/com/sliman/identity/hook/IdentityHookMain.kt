@@ -60,45 +60,43 @@ class IdentityHookMain : IXposedHookLoadPackage {
     }
 
     private fun loadProfile(context: Context?, packageName: String): DeviceProfile? {
-        try {
-            val file = File("/data/local/tmp/sliman_identity/$packageName.json")
-            if (file.exists()) {
-                if (file.canRead()) {
-                    val raw = file.readText()
-                    val parsed = DeviceProfile.fromJson(raw)
-                    if (parsed != null) {
-                        XposedBridge.log("SlimanIdentity: loaded JSON file for $packageName")
-                        return parsed
-                    } else {
-                        XposedBridge.log("SlimanIdentity: invalid JSON in file for $packageName")
+        // 1. القراءة أولاً عبر ContentProvider (لا تحتاج /data/local/tmp)
+        if (context != null) {
+            try {
+                val uri = Uri.parse("content://com.sliman.identity.provider/profile/$packageName")
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex("json_data")
+                        if (idx >= 0) {
+                            val parsed = DeviceProfile.fromJson(cursor.getString(idx))
+                            if (parsed != null) {
+                                XposedBridge.log("SlimanIdentity: loaded via ContentProvider for $packageName")
+                                return parsed
+                            }
+                        }
                     }
-                } else {
-                    XposedBridge.log("SlimanIdentity: file exists but canRead()=false for $packageName")
                 }
-            } else {
-                XposedBridge.log("SlimanIdentity: file not found for $packageName")
+            } catch (e: Throwable) {
+                XposedBridge.log("SlimanIdentity: provider error for $packageName -> ${e.javaClass.simpleName}: ${e.message}")
             }
-        } catch (e: Throwable) {
-            XposedBridge.log("SlimanIdentity: file error for $packageName -> ${e.javaClass.simpleName}: ${e.message}")
         }
 
-        if (context == null) return null
-        return try {
-            val uri = Uri.parse("content://com.sliman.identity.provider/profile/$packageName")
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val idx = cursor.getColumnIndex("json_data")
-                    if (idx >= 0) {
-                        XposedBridge.log("SlimanIdentity: loaded profile via ContentProvider for $packageName")
-                        return DeviceProfile.fromJson(cursor.getString(idx))
-                    }
+        // 2. مسار احتياطي من ملف JSON في /data/local/tmp/sliman_identity
+        try {
+            val file = File("/data/local/tmp/sliman_identity/$packageName.json")
+            if (file.exists() && file.canRead()) {
+                val parsed = DeviceProfile.fromJson(file.readText())
+                if (parsed != null) {
+                    XposedBridge.log("SlimanIdentity: loaded via fallback JSON file for $packageName")
+                    return parsed
                 }
-                null
             }
         } catch (e: Throwable) {
-            XposedBridge.log("SlimanIdentity: provider error for $packageName -> ${e.javaClass.simpleName}: ${e.message}")
-            null
+            XposedBridge.log("SlimanIdentity: fallback file error for $packageName -> ${e.javaClass.simpleName}: ${e.message}")
         }
+
+        XposedBridge.log("SlimanIdentity: no active profile found for $packageName")
+        return null
     }
 
     private fun applyHooks(classLoader: ClassLoader, profile: DeviceProfile) {
