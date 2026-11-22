@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.telephony.TelephonyManager
 import com.sliman.identity.model.DeviceProfile
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
@@ -124,12 +123,12 @@ class IdentityHookMain : IXposedHookLoadPackage {
         ) ?: return
 
         if (profile.simCountryIso.isNotBlank()) {
-            XposedHelpers.findAndHookMethod(tmClass, "getSimCountryIso", object : XC_MethodHook() {
+            hookMethodIfExists(tmClass, "getSimCountryIso", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = profile.simCountryIso.lowercase(Locale.ROOT)
                 }
             })
-            XposedHelpers.findAndHookMethod(tmClass, "getNetworkCountryIso", object : XC_MethodHook() {
+            hookMethodIfExists(tmClass, "getNetworkCountryIso", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = profile.simCountryIso.lowercase(Locale.ROOT)
                 }
@@ -137,12 +136,12 @@ class IdentityHookMain : IXposedHookLoadPackage {
         }
 
         if (profile.networkOperator.isNotBlank()) {
-            XposedHelpers.findAndHookMethod(tmClass, "getNetworkOperator", object : XC_MethodHook() {
+            hookMethodIfExists(tmClass, "getNetworkOperator", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = profile.networkOperator
                 }
             })
-            XposedHelpers.findAndHookMethod(tmClass, "getSimOperator", object : XC_MethodHook() {
+            hookMethodIfExists(tmClass, "getSimOperator", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = profile.networkOperator
                 }
@@ -150,12 +149,12 @@ class IdentityHookMain : IXposedHookLoadPackage {
         }
 
         if (profile.networkOperatorName.isNotBlank()) {
-            XposedHelpers.findAndHookMethod(tmClass, "getNetworkOperatorName", object : XC_MethodHook() {
+            hookMethodIfExists(tmClass, "getNetworkOperatorName", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = profile.networkOperatorName
                 }
             })
-            XposedHelpers.findAndHookMethod(tmClass, "getSimOperatorName", object : XC_MethodHook() {
+            hookMethodIfExists(tmClass, "getSimOperatorName", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = profile.networkOperatorName
                 }
@@ -164,12 +163,28 @@ class IdentityHookMain : IXposedHookLoadPackage {
 
         if (profile.imei.isNotBlank()) {
             for (method in listOf("getDeviceId", "getImei")) {
-                XposedHelpers.findAndHookMethodIfExists(tmClass, method, object : XC_MethodHook() {
+                hookMethodIfExists(tmClass, method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         param.result = profile.imei
                     }
                 })
             }
+        }
+    }
+
+    private fun hookMethodIfExists(
+        clazz: Class<*>,
+        methodName: String,
+        callback: XC_MethodHook
+    ) {
+        try {
+            val hasMethod = clazz.declaredMethods.any { it.name == methodName } ||
+                clazz.methods.any { it.name == methodName }
+            if (hasMethod) {
+                XposedHelpers.findAndHookMethod(clazz, methodName, callback)
+            }
+        } catch (_: Throwable) {
+            // تجاهل إذا اختلفت التواقيع أو الدالة غير موجودة في نسخة أندرويد الحالية
         }
     }
 
@@ -182,15 +197,5 @@ class IdentityHookMain : IXposedHookLoadPackage {
         } catch (_: Throwable) {
             // بعض الحقول على إصدارات أندرويد الحديثة قد تكون مقيدة
         }
-    }
-}
-
-private fun XposedHelpers.findAndHookMethodIfExists(
-    clazz: Class<*>,
-    methodName: String,
-    vararg parameterTypesAndCallback: Any
-) {
-    if (clazz.declaredMethods.any { it.name == methodName } || clazz.methods.any { it.name == methodName }) {
-        XposedHelpers.findAndHookMethod(clazz, methodName, *parameterTypesAndCallback)
     }
 }
