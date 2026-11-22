@@ -31,28 +31,16 @@ jobs:
           distribution: "temurin"
           cache: "gradle"
 
-      - name: Prepare Gradle & Wrapper
+      - name: Prepare Gradle 8.11.1 & Wrapper
         run: |
-          mkdir -p gradle/wrapper
-          cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
-          networkTimeout=10000
-          validateDistributionUrl=true
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            curl -sSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
-            unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
-            /tmp/gradle-dist/gradle-8.9/bin/gradle wrapper --gradle-version 8.9
-          fi
+          GRADLE_VER="8.11.1"
+          curl -sSL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip"
+          unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
+          /tmp/gradle-dist/gradle-${GRADLE_VER}/bin/gradle wrapper --gradle-version "${GRADLE_VER}" --distribution-type bin
           chmod +x gradlew
 
       - name: Build Debug & Release APKs
-        run: ./gradlew assembleDebug assembleRelease
+        run: ./gradlew assembleDebug assembleRelease --no-daemon
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
