@@ -1,7 +1,96 @@
-distributionBase=GRADLE_USER_HOME
-distributionPath=wrapper/dists
-distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
-networkTimeout=10000
-validateDistributionUrl=true
-zipStoreBase=GRADLE_USER_HOME
-zipStorePath=wrapper/dists
+#!/bin/sh
+#
+# Copyright © 2015-2021 the original authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Attempt to set APP_HOME
+# Resolve links: $0 may be a link
+app_path=$0
+
+# Need this for relative symlinks.
+while [ -h "$app_path" ] ; do
+    ls=`ls -ld "$app_path"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        app_path="$link"
+    else
+        app_path="`dirname "$app_path"`/$link"
+    fi
+done
+
+APP_HOME=`dirname "$app_path"`
+APP_HOME=`cd "$APP_HOME" && pwd`
+
+DEFAULT_JVM_OPTS='"-Xmx2048m" "-Dfile.encoding=UTF-8"'
+APP_NAME="Gradle"
+APP_BASE_NAME=`basename "$0"`
+
+# Use the maximum available, or set MAX_MEMO to override
+MAX_MEMO=`echo "$DEFAULT_JVM_OPTS" | grep -o -- '-Xmx[0-9]*[kKmMgG]' || true`
+
+warn () {
+    echo "$*"
+} >&2
+
+die () {
+    echo
+    echo "$*"
+    echo
+    exit 1
+} >&2
+
+# Determine the Java command to use to start the JVM.
+if [ -n "$JAVA_HOME" ] ; then
+    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
+        # IBM's JDK on AIX uses strange locations for the executables
+        JAVACMD="$JAVA_HOME/jre/sh/java"
+    else
+        JAVACMD="$JAVA_HOME/bin/java"
+    fi
+    if [ ! -x "$JAVACMD" ] ; then
+        die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME
+
+Please set the JAVA_HOME variable in your environment to match the
+location of your Java installation."
+    fi
+else
+    JAVACMD="java"
+    which java >/dev/null 2>&1 || die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+
+Please set the JAVA_HOME variable in your environment to match the
+location of your Java installation."
+fi
+
+# Increase the maximum file descriptors if we can.
+if [ "${cygwin}" = "false" ] && [ "${darwin}" = "false" ] && [ "${nonstop}" = "false" ] ; then
+    MAX_FD_LIMIT=`ulimit -H -n`
+    if [ $? -eq 0 ] ; then
+        if [ "$MAX_FD" = "maximum" ] || [ "$MAX_FD" = "max" ] ; then
+            MAX_FD="$MAX_FD_LIMIT"
+        fi
+        ulimit -n $MAX_FD
+        if [ $? -ne 0 ] ; then
+            warn "Could not set maximum file descriptors to $MAX_FD"
+        fi
+    else
+        warn "Could not query maximum file descriptors limit: ulimit -H -n"
+    fi
+fi
+
+# Collect all arguments for the java command, following the shell quoting conventions
+set -- "$@"
+eval set -- $DEFAULT_JVM_OPTS
+
+exec "$JAVACMD" "$@" -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" "$@"
