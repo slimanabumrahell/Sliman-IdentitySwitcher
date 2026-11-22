@@ -8,6 +8,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import com.sliman.identity.model.DeviceProfile
+import java.io.File
 
 class ProfileProvider : ContentProvider() {
 
@@ -64,6 +65,18 @@ class ProfileProvider : ContentProvider() {
                     putString("active_profile_${profile.targetPackage}", profile.id)
                 }
                 apply()
+            }
+
+            if (setActive && profile.targetPackage.isNotBlank()) {
+                try {
+                    val dir = File("/data/local/tmp/sliman_identity")
+                    if (!dir.exists()) dir.mkdirs()
+                    val outFile = File(dir, "${profile.targetPackage}.json")
+                    outFile.writeText(profile.toJson())
+                    outFile.setReadable(true, false)
+                    dir.setExecutable(true, false)
+                } catch (_: Throwable) {
+                }
             }
         }
     }
