@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Sliman-Identity</string>
+    <string name="xposed_desc">Per-app device identity switcher (model, IDs, IMEI, MAC...)</string>
+</resources>
