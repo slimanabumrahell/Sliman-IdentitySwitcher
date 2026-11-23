@@ -5,15 +5,15 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
-
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
         mavenCentral()
-        jcenter() // مطلوب لبعض نسخ مكتبة Xposed API القديمة
+        maven("https://api.xposed.info/") {
+            content { includeGroup("de.robv.android.xposed") }
+        }
     }
 }
-
 rootProject.name = "Sliman-IdentitySwitcher"
 include(":app")
