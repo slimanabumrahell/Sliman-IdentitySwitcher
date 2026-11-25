@@ -16,6 +16,7 @@ jobs:
         working-directory: native-module
         run: |
           export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          chmod +x build.sh fetch-deps.sh
           ./build.sh
       - uses: actions/upload-artifact@v4
         with:
