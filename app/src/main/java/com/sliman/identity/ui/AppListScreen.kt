@@ -56,6 +56,7 @@ fun AppListScreen(
     profiles: Map<String, Profile>,
     onExportAll: () -> Unit,
     onImportAll: () -> Unit,
+    onSyncNative: () -> Unit,
     onOpen: (AppItem) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -70,7 +71,7 @@ fun AppListScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Header(activeCount, onExportAll, onImportAll)
+        Header(activeCount, onExportAll, onImportAll, onSyncNative)
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -100,7 +101,7 @@ fun AppListScreen(
 }
 
 @Composable
-private fun Header(activeCount: Int, onExportAll: () -> Unit, onImportAll: () -> Unit) {
+private fun Header(activeCount: Int, onExportAll: () -> Unit, onImportAll: () -> Unit, onSyncNative: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Box(
         Modifier
@@ -113,6 +114,7 @@ private fun Header(activeCount: Int, onExportAll: () -> Unit, onImportAll: () ->
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Export all profiles") }, onClick = { menu = false; onExportAll() })
                 DropdownMenuItem(text = { Text("Import profiles") }, onClick = { menu = false; onImportAll() })
+                DropdownMenuItem(text = { Text("Sync native module") }, onClick = { menu = false; onSyncNative() })
             }
         }
         Column {
