@@ -26,6 +26,9 @@
 | DRM | `MediaDrm` deviceUniqueId, securityLevel, systemId |
 | Google SDKs (if bundled by the app) | Advertising ID, App Set ID, Firebase Installation ID, Firebase App Instance ID |
 | Google services | GSF ID via the gservices provider, fake Google account via `AccountManager` |
+| Hardware | `Runtime.availableProcessors`, `ActivityManager.getMemoryInfo` (total/avail RAM), `StatFs` + `File.getTotalSpace/...` (storage, scaled) |
+| Screen | `Display.getRealMetrics/getRealSize` (+ `getMetrics/getSize` on request): size and density |
+| User-Agent | `WebSettings.getDefaultUserAgent`, per-`WebView` UA (at creation and before loads), `http.agent`; rewrite from profile or custom UA |
 | Time / locale | package install time, last boot (`SystemClock.elapsedRealtime*`), timezone, locale, `os.version` |
 | Privacy blocks | accounts, Bluetooth bonded, Wi-Fi scan/configured, cell info, contacts, call log, SMS/MMS, calendar (empty results) |
 
@@ -42,7 +45,16 @@ No Gradle wrapper is committed; run `gradle wrapper --gradle-version 8.9` once i
 3. Open Sliman-Identity, choose the app, edit/randomize, **Save profile**.
 4. Force-stop the target app and reopen it.
 
+## Native module (Zygisk)
+`native-module/` is a Zygisk module that covers what Java hooks cannot reach: libc / GL calls made by native code
+(including browser engines and anti-fraud SDKs). Build it with the **Build native Zygisk module** GitHub workflow
+(artifact `Sliman-Native-Zygisk`), flash the zip in Magisk (Zygisk on) / KernelSU / APatch with a Zygisk provider, reboot.
+The app writes `profiles.conf` into the module folder on every save (root needed); *Sync native module* in the main-screen menu forces it.
+See `native-module/README.md`.
+
 ## Limitations
+- Chrome / Firefox themselves: JS-visible values (WebGL renderer, canvas, `navigator.hardwareConcurrency/deviceMemory`, screen, Client Hints) come from native engine code and separate sandboxed processes, so Java hooks can't change them. UA rewriting works for WebViews inside apps.
+- RAM/storage are changed for Java APIs only; apps reading `/proc/meminfo` or `df` natively (AIDA64 partly) still see the real values.
 - Does not touch Play Integrity / hardware-backed key attestation, or values read from native code / syscalls (`uname`, `/proc/sys/kernel/random/boot_id`, `getprop` via shell).
 - Google SDK ID hooks only work when the app bundles those classes un-obfuscated.
 - Preset build strings (incrementals, SoC names, security patch) are best effort: verify against `getprop` from the real device and edit the fields (or export/import a profile) if they differ.

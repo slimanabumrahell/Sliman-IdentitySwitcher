@@ -7,3 +7,5 @@ local.properties
 captures/
 *.apk
 *.keystore
+native-module/out/
+native-module/third_party/zygisk.hpp
