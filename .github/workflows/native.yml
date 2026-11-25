@@ -1,0 +1,23 @@
+name: Build native Zygisk module
+
+on:
+  push:
+    paths: ['native-module/**', '.github/workflows/native.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Build module zip
+        working-directory: native-module
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sliman-Native-Zygisk
+          path: native-module/out/Sliman-Native-Zygisk.zip
