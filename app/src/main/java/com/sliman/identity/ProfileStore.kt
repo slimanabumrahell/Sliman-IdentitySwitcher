@@ -11,6 +11,8 @@ import org.json.JSONObject
  */
 class ProfileStore(ctx: Context) {
 
+    private val appCtx = ctx.applicationContext
+
     @SuppressLint("WorldReadableFiles")
     private val prefs: SharedPreferences = try {
         @Suppress("DEPRECATION")
@@ -29,6 +31,8 @@ class ProfileStore(ctx: Context) {
         val root = JSONObject()
         map.forEach { (pkg, p) -> root.put(pkg, p.toJson()) }
         prefs.edit().putString(KEY, root.toString()).apply()
+        // Keep the optional Zygisk native module in sync (silent; no-op when it isn't installed).
+        NativeBridge.sync(appCtx, map)
     }
 
     companion object {

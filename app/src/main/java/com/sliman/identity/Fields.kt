@@ -50,6 +50,15 @@ object Fields {
         t("radio", "Build Radio Version", Tab.DEVICE, "Build details"),
         t("socManufacturer", "SoC Manufacturer", Tab.DEVICE, "SoC"),
         t("socModel", "SoC Model", Tab.DEVICE, "SoC"),
+        t("cpuCores", "CPU cores (availableProcessors)", Tab.DEVICE, "Hardware"),
+        t("ramMb", "Total RAM (MB)", Tab.DEVICE, "Hardware"),
+        t("storageGb", "Internal storage (marketed GB, apps see ~93%)", Tab.DEVICE, "Hardware"),
+        t("screenWidth", "Screen width (px)", Tab.DEVICE, "Hardware"),
+        t("screenHeight", "Screen height (px)", Tab.DEVICE, "Hardware"),
+        t("densityDpi", "Density (dpi)", Tab.DEVICE, "Hardware"),
+        t("glVendor", "GPU vendor (GL_VENDOR) - needs native module", Tab.DEVICE, "GPU / WebGL"),
+        t("glRenderer", "GPU renderer (GL_RENDERER) - needs native module", Tab.DEVICE, "GPU / WebGL"),
+        f("screenAlsoApp", "Also spoof getMetrics / getSize", Tab.DEVICE, "Hardware", "On - can distort app layout"),
 
         // ---------------- Identity ----------------
         t("androidId", "Android ID", Tab.IDENTITY, "Device identifiers", true) { Gen.androidId() },
@@ -90,8 +99,11 @@ object Fields {
         t("kernel", "Kernel Version (os.version)", Tab.SYSTEM, "OS version"),
         t("installTime", "App Install Time (epoch ms)", Tab.SYSTEM, "Timestamps", isTime = true) { Gen.installTime() },
         t("lastBoot", "Last Boot Time (epoch ms)", Tab.SYSTEM, "Timestamps", isTime = true) { Gen.lastBoot() },
+        f("uaAuto", "Rewrite WebView / HTTP User-Agent from profile", Tab.SYSTEM, "Browser / WebView", "On (model + Android version)"),
+        t("userAgent", "Custom User-Agent (overrides the rewrite)", Tab.SYSTEM, "Browser / WebView") { Gen.userAgent(it) },
         f("adbFlag", "ADB Debugging Flag", Tab.SYSTEM, "Device trust signals", "Reports OFF"),
         f("devOptionsFlag", "Developer Options Flag", Tab.SYSTEM, "Device trust signals", "Reports OFF"),
+        t("bootId", "Boot ID (/proc/.../boot_id) - needs native module", Tab.SYSTEM, "Native only", true) { Gen.uuid() },
         t("timezone", "Timezone", Tab.SYSTEM, "Location consistency") { Gen.carrier(it).tz },
         t("locale", "Locale (e.g. en-US)", Tab.SYSTEM, "Location consistency") { Gen.carrier(it).locale },
 

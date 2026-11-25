@@ -1,6 +1,7 @@
 package com.sliman.identity
 
 import android.accounts.Account
+import android.app.ActivityManager
 import android.content.ContentResolver
 import android.content.pm.PackageInfo
 import android.database.MatrixCursor
@@ -9,9 +10,14 @@ import android.net.Uri
 import android.net.wifi.WifiInfo
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Point
+import android.os.StatFs
 import android.os.SystemClock
 import android.provider.Settings
 import android.telephony.TelephonyManager
+import android.util.DisplayMetrics
+import android.view.Display
+import android.webkit.WebView
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodReplacement
@@ -19,6 +25,7 @@ import de.robv.android.xposed.XSharedPreferences
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.io.File
 import java.net.NetworkInterface
 import java.util.Locale
 import java.util.TimeZone
@@ -73,6 +80,9 @@ class HookEntry : IXposedHookLoadPackage {
         guard("time") { spoofTime(r, pkg) }
         guard("locale") { spoofLocale(r) }
         guard("kernel") { spoofKernel(r) }
+        guard("hardware") { spoofHardware(r) }
+        guard("display") { spoofDisplay(r) }
+        guard("webview-ua") { spoofUserAgent(r) }
     }
 
     private inline fun guard(name: String, block: () -> Unit) {
@@ -91,7 +101,9 @@ class HookEntry : IXposedHookLoadPackage {
         )
         buildFields.forEach { (key, field) ->
             val v = r[key] ?: return@forEach
+            if (field.startsWith("SOC_") && REAL_SDK < 31) return@forEach
             runCatching { XposedHelpers.setStaticObjectField(Build::class.java, field, v) }
+                .onFailure { XposedBridge.log("Sliman-Identity: Build.$field not settable on API $REAL_SDK") }
         }
         val versionFields = mapOf(
             "androidRelease" to "RELEASE", "securityPatch" to "SECURITY_PATCH", "buildIncremental" to "INCREMENTAL",
@@ -136,7 +148,7 @@ class HookEntry : IXposedHookLoadPackage {
         put("hostname", "net.hostname")
         if (props.isEmpty()) return
 
-        val sp = XposedHelpers.findClass("android.os.SystemProperties", null)
+        val sp = findCls("android.os.SystemProperties")
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val key = param.args.firstOrNull() as? String ?: return
@@ -146,7 +158,7 @@ class HookEntry : IXposedHookLoadPackage {
                 } else v
             }
         }
-        listOf("get", "getInt", "getLong").forEach { XposedBridge.hookAllMethods(sp, it, hook) }
+        listOf("get", "getInt", "getLong").forEach { hookAll(sp, it, hook) }
     }
 
     // ---------------------------------------------------------------- Settings
@@ -172,7 +184,7 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun hookSettings(cls: Class<*>, strings: Map<String, String>, ints: Map<String, Int>) {
         if (strings.isNotEmpty()) {
-            XposedBridge.hookAllMethods(cls, "getString", object : XC_MethodHook() {
+            hookAll(cls, "getString", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val name = param.args.getOrNull(1) as? String ?: return
                     strings[name]?.let { param.result = it }
@@ -180,7 +192,7 @@ class HookEntry : IXposedHookLoadPackage {
             })
         }
         if (ints.isNotEmpty()) {
-            XposedBridge.hookAllMethods(cls, "getInt", object : XC_MethodHook() {
+            hookAll(cls, "getInt", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val name = param.args.getOrNull(1) as? String ?: return
                     ints[name]?.let { param.result = it }
@@ -204,7 +216,7 @@ class HookEntry : IXposedHookLoadPackage {
         r["netOperator"]?.let { replace(tm, "getNetworkOperator", it) }
         r["netOperatorName"]?.let { replace(tm, "getNetworkOperatorName", it) }
         r["netCountry"]?.let { replace(tm, "getNetworkCountryIso", it) }
-        r["simCarrierId"]?.toIntOrNull()?.let { replaceAny(tm, "getSimCarrierId", it) }
+        if (REAL_SDK >= 28) r["simCarrierId"]?.toIntOrNull()?.let { replaceAny(tm, "getSimCarrierId", it) }
 
         runCatching {
             val si = XposedHelpers.findClass("android.telephony.SubscriptionInfo", null)
@@ -220,7 +232,7 @@ class HookEntry : IXposedHookLoadPackage {
         r["wifiMac"]?.let { mac ->
             replace(WifiInfo::class.java, "getMacAddress", mac)
             macBytes(mac)?.let { bytes ->
-                XposedHelpers.findAndHookMethod(NetworkInterface::class.java, "getHardwareAddress", object : XC_MethodHook() {
+                hookAll(NetworkInterface::class.java, "getHardwareAddress", object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         if ((param.thisObject as NetworkInterface).name == "wlan0") param.result = bytes
                     }
@@ -245,14 +257,14 @@ class HookEntry : IXposedHookLoadPackage {
         if (id == null && level == null && sysId == null) return
 
         if (id != null) {
-            XposedBridge.hookAllMethods(MediaDrm::class.java, "getPropertyByteArray", object : XC_MethodHook() {
+            hookAll(MediaDrm::class.java, "getPropertyByteArray", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (param.args.firstOrNull() == "deviceUniqueId") param.result = id
                 }
             })
         }
         if (level != null || sysId != null) {
-            XposedBridge.hookAllMethods(MediaDrm::class.java, "getPropertyString", object : XC_MethodHook() {
+            hookAll(MediaDrm::class.java, "getPropertyString", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     when (param.args.firstOrNull()) {
                         "securityLevel" -> level?.let { param.result = it }
@@ -285,7 +297,7 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun replaceByName(cl: ClassLoader, cls: String, method: String, value: Any) {
         runCatching {
-            XposedBridge.hookAllMethods(XposedHelpers.findClass(cls, cl), method, XC_MethodReplacement.returnConstant(value))
+            hookAll(XposedHelpers.findClass(cls, cl), method, XC_MethodReplacement.returnConstant(value))
         }
     }
 
@@ -293,7 +305,7 @@ class HookEntry : IXposedHookLoadPackage {
     private fun taskResult(cl: ClassLoader, cls: String, method: String, value: String) {
         runCatching {
             val tasks = XposedHelpers.findClass("com.google.android.gms.tasks.Tasks", cl)
-            XposedBridge.hookAllMethods(XposedHelpers.findClass(cls, cl), method, object : XC_MethodHook() {
+            hookAll(XposedHelpers.findClass(cls, cl), method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.result = XposedHelpers.callStaticMethod(tasks, "forResult", value)
                 }
@@ -309,12 +321,12 @@ class HookEntry : IXposedHookLoadPackage {
         if (!block && email == null) return
         val fake = email?.let { Account(it, "com.google") }
 
-        XposedBridge.hookAllMethods(android.accounts.AccountManager::class.java, "getAccounts", object : XC_MethodHook() {
+        hookAll(android.accounts.AccountManager::class.java, "getAccounts", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 param.result = if (fake != null) arrayOf(fake) else emptyArray<Account>()
             }
         })
-        XposedBridge.hookAllMethods(android.accounts.AccountManager::class.java, "getAccountsByType", object : XC_MethodHook() {
+        hookAll(android.accounts.AccountManager::class.java, "getAccountsByType", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val type = param.args.firstOrNull() as? String
                 when {
@@ -337,7 +349,7 @@ class HookEntry : IXposedHookLoadPackage {
         }
         if (gsfDecimal == null && blocked.isEmpty()) return
 
-        XposedBridge.hookAllMethods(ContentResolver::class.java, "query", object : XC_MethodHook() {
+        hookAll(ContentResolver::class.java, "query", object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val uri = param.args.firstOrNull() as? Uri ?: return
                 val auth = uri.authority ?: return
@@ -360,16 +372,16 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun blockLists(r: Resolver) {
         if (r.flag("blockBtBonded")) {
-            XposedBridge.hookAllMethods(android.bluetooth.BluetoothAdapter::class.java, "getBondedDevices",
+            hookAll(android.bluetooth.BluetoothAdapter::class.java, "getBondedDevices",
                 XC_MethodReplacement.returnConstant(HashSet<Any>()))
         }
         val wm = android.net.wifi.WifiManager::class.java
-        if (r.flag("blockWifiScan")) XposedBridge.hookAllMethods(wm, "getScanResults", XC_MethodReplacement.returnConstant(ArrayList<Any>()))
-        if (r.flag("blockWifiConfigured")) XposedBridge.hookAllMethods(wm, "getConfiguredNetworks", XC_MethodReplacement.returnConstant(ArrayList<Any>()))
+        if (r.flag("blockWifiScan")) hookAll(wm, "getScanResults", XC_MethodReplacement.returnConstant(ArrayList<Any>()))
+        if (r.flag("blockWifiConfigured")) hookAll(wm, "getConfiguredNetworks", XC_MethodReplacement.returnConstant(ArrayList<Any>()))
         if (r.flag("blockCellInfo")) {
             val tm = TelephonyManager::class.java
-            XposedBridge.hookAllMethods(tm, "getAllCellInfo", XC_MethodReplacement.returnConstant(ArrayList<Any>()))
-            XposedBridge.hookAllMethods(tm, "getCellLocation", XC_MethodReplacement.returnConstant(null))
+            hookAll(tm, "getAllCellInfo", XC_MethodReplacement.returnConstant(ArrayList<Any>()))
+            hookAll(tm, "getCellLocation", XC_MethodReplacement.returnConstant(null))
         }
     }
 
@@ -377,8 +389,8 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun spoofTime(r: Resolver, pkg: String) {
         r["installTime"]?.toLongOrNull()?.let { t ->
-            val cls = XposedHelpers.findClass("android.app.ApplicationPackageManager", null)
-            XposedBridge.hookAllMethods(cls, "getPackageInfo", object : XC_MethodHook() {
+            val cls = findCls("android.app.ApplicationPackageManager")
+            hookAll(cls, "getPackageInfo", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val pi = param.result as? PackageInfo ?: return
                     if (pi.packageName == pkg) { pi.firstInstallTime = t; pi.lastUpdateTime = t }
@@ -386,10 +398,10 @@ class HookEntry : IXposedHookLoadPackage {
             })
         }
         r["lastBoot"]?.toLongOrNull()?.takeIf { it < System.currentTimeMillis() }?.let { boot ->
-            XposedBridge.hookAllMethods(SystemClock::class.java, "elapsedRealtime", object : XC_MethodReplacement() {
+            hookAll(SystemClock::class.java, "elapsedRealtime", object : XC_MethodReplacement() {
                 override fun replaceHookedMethod(param: MethodHookParam): Any = System.currentTimeMillis() - boot
             })
-            XposedBridge.hookAllMethods(SystemClock::class.java, "elapsedRealtimeNanos", object : XC_MethodReplacement() {
+            hookAll(SystemClock::class.java, "elapsedRealtimeNanos", object : XC_MethodReplacement() {
                 override fun replaceHookedMethod(param: MethodHookParam): Any = (System.currentTimeMillis() - boot) * 1_000_000L
             })
         }
@@ -402,11 +414,182 @@ class HookEntry : IXposedHookLoadPackage {
 
     private fun spoofKernel(r: Resolver) {
         val k = r["kernel"] ?: return
-        XposedBridge.hookAllMethods(System::class.java, "getProperty", object : XC_MethodHook() {
+        hookAll(System::class.java, "getProperty", object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.args.firstOrNull() == "os.version") param.result = k
             }
         })
+    }
+
+
+    // ---------------------------------------------------------------- Hardware specs (cores / RAM / storage)
+
+    private fun spoofHardware(r: Resolver) {
+        r["cpuCores"]?.toIntOrNull()?.takeIf { it > 0 }?.let { n ->
+            hookAll(Runtime::class.java, "availableProcessors", XC_MethodReplacement.returnConstant(n))
+        }
+
+        r["ramMb"]?.toLongOrNull()?.takeIf { it > 0 }?.let { mb ->
+            val total = mb * 1024L * 1024L
+            hookAll(ActivityManager::class.java, "getMemoryInfo", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val mi = param.args.firstOrNull() as? ActivityManager.MemoryInfo ?: return
+                    val real = mi.totalMem
+                    if (real <= 0) return
+                    val ratio = mi.availMem.toDouble() / real
+                    mi.threshold = (mi.threshold.toDouble() * total / real).toLong()
+                    mi.totalMem = total
+                    mi.availMem = (total * ratio).toLong()
+                }
+            })
+        }
+
+        r["storageGb"]?.toLongOrNull()?.takeIf { it > 0 }?.let { gb ->
+            val target = gb * 1_000_000_000.0 * 0.93
+            // Measured BEFORE the File hooks below are installed.
+            val real = runCatching { File("/data").totalSpace }.getOrDefault(0L)
+            if (real <= 0) return@let
+            val ratio = target / real
+            val scale = object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    param.result = when (val v = param.result) {
+                        is Long -> (v * ratio).toLong()
+                        is Int -> (v * ratio).toLong().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                        else -> v
+                    }
+                }
+            }
+            listOf(
+                "getTotalBytes", "getFreeBytes", "getAvailableBytes",
+                "getBlockCountLong", "getFreeBlocksLong", "getAvailableBlocksLong",
+                "getBlockCount", "getFreeBlocks", "getAvailableBlocks",
+            ).forEach { hookAll(StatFs::class.java, it, scale) }
+            listOf("getTotalSpace", "getFreeSpace", "getUsableSpace").forEach {
+                hookAll(File::class.java, it, scale)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Screen
+
+    private fun spoofDisplay(r: Resolver) {
+        val w = r["screenWidth"]?.toIntOrNull()?.takeIf { it > 0 }
+        val h = r["screenHeight"]?.toIntOrNull()?.takeIf { it > 0 }
+        val dpi = r["densityDpi"]?.toIntOrNull()?.takeIf { it > 0 }
+        if (w == null && h == null && dpi == null) return
+        val shortSide = if (w != null && h != null) minOf(w, h) else null
+        val longSide = if (w != null && h != null) maxOf(w, h) else null
+
+        fun fixMetrics(dm: DisplayMetrics) {
+            if (shortSide != null && longSide != null) {
+                val landscape = dm.widthPixels > dm.heightPixels
+                dm.widthPixels = if (landscape) longSide else shortSide
+                dm.heightPixels = if (landscape) shortSide else longSide
+            }
+            if (dpi != null) {
+                dm.densityDpi = dpi
+                dm.density = dpi / 160f
+                dm.scaledDensity = dm.density
+                dm.xdpi = dpi.toFloat()
+                dm.ydpi = dpi.toFloat()
+            }
+        }
+        fun fixPoint(pt: Point) {
+            if (shortSide != null && longSide != null) {
+                val landscape = pt.x > pt.y
+                pt.x = if (landscape) longSide else shortSide
+                pt.y = if (landscape) shortSide else longSide
+            }
+        }
+        fun hook(method: String) {
+            hookAll(Display::class.java, method, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    when (val a = param.args.firstOrNull()) {
+                        is DisplayMetrics -> fixMetrics(a)
+                        is Point -> fixPoint(a)
+                    }
+                }
+            })
+        }
+        hook("getRealMetrics"); hook("getRealSize")
+        // Layout-affecting variants: only on request.
+        if (r.flag("screenAlsoApp")) { hook("getMetrics"); hook("getSize") }
+    }
+
+    // ---------------------------------------------------------------- User-Agent (WebView + HTTP stack)
+
+    private val UA_RE = Regex("""\(Linux; (U; )?Android ([^;)]+); ([^;)]*?)( Build/[^;)]*)?(; wv)?\)""")
+
+    /** Replaces the Android version / model / build id tokens of a UA, keeping the real browser engine version. */
+    private fun rewriteUa(ua: String?, r: Resolver): String? {
+        if (ua == null) return null
+        r["userAgent"]?.let { return it }
+        if (!r.flag("uaAuto")) return ua
+        return UA_RE.replace(ua) { m ->
+            val rel = r["androidRelease"] ?: m.groupValues[2]
+            val model = r["model"] ?: m.groupValues[3]
+            val build = if (m.groupValues[4].isNotEmpty()) " Build/" + (r["buildId"] ?: m.groupValues[4].removePrefix(" Build/")) else ""
+            "(Linux; ${m.groupValues[1]}Android $rel; $model$build${m.groupValues[5]})"
+        }
+    }
+
+    private fun spoofUserAgent(r: Resolver) {
+        if (r["userAgent"] == null && !r.flag("uaAuto")) return
+
+        // Default UA getters (static) and the Java HTTP stack's UA.
+        runCatching {
+            hookAll(findCls("android.webkit.WebSettings"), "getDefaultUserAgent",
+                object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) { param.result = rewriteUa(param.result as? String, r) }
+                })
+        }
+        hookAll(System::class.java, "getProperty", object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.args.firstOrNull() == "http.agent") param.result = rewriteUa(param.result as? String, r)
+            }
+        })
+
+        // Per-WebView: rewrite the effective UA at creation and before every load (covers apps that set their own).
+        val apply = { wv: WebView ->
+            runCatching {
+                val st = wv.settings
+                val cur = st.userAgentString
+                val next = rewriteUa(cur, r)
+                if (next != null && next != cur) st.userAgentString = next
+            }
+        }
+        XposedBridge.hookAllConstructors(WebView::class.java, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) { apply(param.thisObject as WebView) }
+        })
+        listOf("loadUrl", "postUrl", "loadData", "loadDataWithBaseURL", "reload").forEach { name ->
+            hookAll(WebView::class.java, name, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) { apply(param.thisObject as WebView) }
+            })
+        }
+    }
+
+
+    // ---------------------------------------------------------------- version-robust hooking
+
+    /** Real API level, captured before any SDK_INT spoof so version checks in this module stay truthful. */
+    private val REAL_SDK = Build.VERSION.SDK_INT
+
+    private fun findCls(name: String, cl: ClassLoader? = null): Class<*>? =
+        runCatching { XposedHelpers.findClass(name, cl) }.getOrNull()
+
+    /**
+     * Hooks every overload of [name]. A missing class/method (older or newer Android) or a failing hook only skips
+     * that single hook and is logged, instead of aborting a whole group.
+     */
+    private fun hookAll(cls: Class<*>?, name: String, cb: XC_MethodHook) {
+        if (cls == null) return
+        try {
+            if (XposedBridge.hookAllMethods(cls, name, cb).isEmpty()) {
+                XposedBridge.log("Sliman-Identity: ${cls.simpleName}.$name not present on API $REAL_SDK (skipped)")
+            }
+        } catch (t: Throwable) {
+            XposedBridge.log("Sliman-Identity: hook ${cls.simpleName}.$name failed on API $REAL_SDK: $t")
+        }
     }
 
     // ---------------------------------------------------------------- helpers
@@ -414,7 +597,6 @@ class HookEntry : IXposedHookLoadPackage {
     private fun replace(cls: Class<*>, method: String, value: String) = replaceAny(cls, method, value)
 
     private fun replaceAny(cls: Class<*>, method: String, value: Any) {
-        runCatching { XposedBridge.hookAllMethods(cls, method, XC_MethodReplacement.returnConstant(value)) }
-            .onFailure { XposedBridge.log("Sliman-Identity: hook ${cls.simpleName}.$method failed: $it") }
+        hookAll(cls, method, XC_MethodReplacement.returnConstant(value))
     }
 }

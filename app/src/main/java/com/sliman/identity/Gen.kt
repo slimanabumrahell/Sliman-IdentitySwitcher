@@ -133,6 +133,12 @@ object Gen {
         return prefixes[rnd.nextInt(prefixes.size)] + pick("0123456789ABCDEF", 4)
     }
 
+    fun userAgent(p: Profile): String {
+        val rel = p["androidRelease"].ifBlank { "14" }
+        val model = p["model"].ifBlank { "Pixel 7 Pro" }
+        return "Mozilla/5.0 (Linux; Android $rel; $model) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+    }
+
     fun hostname(): String = "android-" + hex(16)
 
     fun installTime(): String = (System.currentTimeMillis() - between(7L * DAY, 400L * DAY)).toString()

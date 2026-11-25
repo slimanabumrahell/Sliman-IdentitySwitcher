@@ -100,6 +100,16 @@ private fun Root(store: ProfileStore) {
                         }
                     }
                 },
+                onSyncNative = {
+                    NativeBridge.sync(ctx, profiles.toMap()) { res ->
+                        val msg = when (res) {
+                            NativeBridge.Result.OK -> "Native module synced"
+                            NativeBridge.Result.NOT_INSTALLED -> "Native module not installed (flash the Zygisk zip first)"
+                            NativeBridge.Result.NO_ROOT -> "Root access was denied"
+                        }
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                    }
+                },
                 onOpen = { selected = it },
             )
             else -> EditorScreen(
