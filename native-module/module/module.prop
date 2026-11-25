@@ -1,0 +1,6 @@
+id=sliman_native
+name=Sliman Native Hooks
+version=v1.0.0
+versionCode=1
+author=Sliman
+description=Zygisk companion of Sliman-Identity: native-level (libc / GL) device identity spoofing per app. Configure from the Sliman-Identity app.
